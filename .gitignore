@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment — never commit secrets
+.env
+.env.local
+.env*.local
+
+# Local database
+*.db
+*.db-shm
+*.db-wal
+
+# Uploaded user files
+uploads/
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Next.js auto-generated type declarations
+next-env.d.ts
+
+# Claude Code session data
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
