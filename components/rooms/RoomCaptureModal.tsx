@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Footprints, Mic, MicOff, Camera, Sparkles, Check, RotateCcw, ChevronRight } from 'lucide-react';
+import { Footprints, Mic, MicOff, Camera, Sparkles, Check, RotateCcw, ChevronRight, Upload, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -491,11 +491,191 @@ function PhotoTab({ onUse }: { onUse: (r: CaptureResult) => void }) {
   );
 }
 
+// ─── Import Scan Tab ──────────────────────────────────────────────────────────
+
+type ParsedScan = {
+  name?: string;
+  type?: string;
+  widthFt?: string;
+  lengthFt?: string;
+  heightFt?: string;
+  style?: string;
+  notes?: string;
+  source?: string;
+  error?: string;
+};
+
+const RECOMMENDED_APPS = [
+  {
+    name: 'Magicplan',
+    url: 'https://apps.apple.com/app/magicplan/id427424432',
+    lidar: true,
+    free: true,
+    export: 'Share → Export → XML',
+    note: 'Uses LiDAR on Pro iPhones; camera AR on all others. Free tier supports XML export.',
+  },
+  {
+    name: 'RoomScan Pro',
+    url: 'https://apps.apple.com/app/roomscan-pro-floor-plan-app/id673673224',
+    lidar: true,
+    free: false,
+    export: 'Share → XML or JSON',
+    note: 'Uses LiDAR + Apple RoomPlan. Exports RoomPlan JSON directly.',
+  },
+  {
+    name: 'Polycam',
+    url: 'https://apps.apple.com/app/polycam-lidar-3d-scanner/id1532482376',
+    lidar: true,
+    free: false,
+    export: 'Share → Export → Floor Plan → DXF or PDF',
+    note: 'LiDAR required for floor plan mode. Floor plans on paid plan.',
+  },
+];
+
+function ImportTab({ onUse, serverUrl }: { onUse: (r: CaptureResult) => void; serverUrl: string }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<ParsedScan | null>(null);
+  const [showApps, setShowApps] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleUpload(f: File) {
+    setFile(f);
+    setResult(null);
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      const res = await fetch('/api/rooms/scan/upload', { method: 'POST', body: fd });
+      const data = await res.json() as ParsedScan;
+      if (data.error) throw new Error(data.error);
+      setResult(data);
+    } catch (err) {
+      toast.error(`${err}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const sourceLabel: Record<string, string> = {
+    'roomplan-json':   'Apple RoomPlan JSON',
+    'xml':             'Floor Plan XML',
+    'ollama-fallback': 'AI-extracted',
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* How it works */}
+      <div className="rounded-lg border p-3 text-xs space-y-2">
+        <p className="font-medium text-sm">LiDAR scan → import</p>
+        <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+          <li>Scan your room with a supported iPhone app</li>
+          <li>Export the scan file (XML or JSON)</li>
+          <li>
+            <span className="font-medium">iOS Shortcut</span> — share from the app directly to Nest, <span className="font-medium">or</span>
+          </li>
+          <li>
+            <span className="font-medium">Manual</span> — save to Files, then upload below
+          </li>
+        </ol>
+      </div>
+
+      {/* iOS Shortcut setup */}
+      <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+        <p className="text-xs font-medium">Set up iOS Shortcut (one-time)</p>
+        <p className="text-xs text-muted-foreground">
+          Install the <strong>Send to Nest</strong> Shortcut. It will appear in every app&apos;s
+          share sheet — just share your scan file to it.
+        </p>
+        <div className="bg-muted rounded p-2 text-xs font-mono break-all select-all">
+          {serverUrl}/api/rooms/scan/upload
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Create a Shortcut: <strong>Receive File → Get Contents of URL</strong> (POST, form field <code>file</code>, value: Shortcut Input). Paste the URL above.
+        </p>
+      </div>
+
+      {/* File upload */}
+      <div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".json,.xml,.dxf,.txt,.ifc"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }}
+          className="hidden"
+        />
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+        >
+          <Upload className="h-4 w-4 mr-2" />
+          {uploading ? 'Parsing…' : file ? `Re-upload (${file.name})` : 'Upload Scan File'}
+        </Button>
+        <p className="text-xs text-muted-foreground mt-1 text-center">
+          Accepts .json (RoomPlan), .xml (Magicplan/RoomScan), .dxf
+        </p>
+      </div>
+
+      {/* Result */}
+      {result && (
+        <div className="rounded-lg border bg-muted/50 p-3 text-sm space-y-1.5">
+          {result.source && (
+            <p className="text-xs text-muted-foreground mb-2">
+              Parsed via {sourceLabel[result.source] ?? result.source}
+            </p>
+          )}
+          {result.name     && <p><span className="text-muted-foreground text-xs">Name</span><br />{result.name}</p>}
+          {result.type     && <p><span className="text-muted-foreground text-xs">Type</span><br />{result.type.replace(/_/g, ' ')}</p>}
+          {(result.widthFt || result.lengthFt) && (
+            <p><span className="text-muted-foreground text-xs">Dimensions</span><br />
+              {result.widthFt ?? '?'}′ × {result.lengthFt ?? '?'}′{result.heightFt ? ` × ${result.heightFt}′ ceiling` : ''}
+            </p>
+          )}
+          {result.style    && <p><span className="text-muted-foreground text-xs">Style</span><br />{result.style.replace(/_/g, ' ')}</p>}
+          {result.notes    && <p><span className="text-muted-foreground text-xs">Notes</span><br />{result.notes}</p>}
+          <Button className="w-full mt-2" onClick={() => onUse(result as CaptureResult)}>
+            <Check className="h-4 w-4 mr-2" /> Use This Data
+          </Button>
+        </div>
+      )}
+
+      {/* App recommendations (collapsed by default) */}
+      <button
+        className="text-xs text-muted-foreground w-full text-left flex items-center gap-1"
+        onClick={() => setShowApps((s) => !s)}
+      >
+        <ExternalLink className="h-3 w-3" />
+        {showApps ? 'Hide' : 'Show'} recommended scanning apps
+      </button>
+      {showApps && (
+        <div className="space-y-2">
+          {RECOMMENDED_APPS.map((app) => (
+            <div key={app.name} className="rounded-lg border p-2.5 text-xs space-y-0.5">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">{app.name}</span>
+                <div className="flex gap-1">
+                  {app.lidar && <span className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded px-1">LiDAR</span>}
+                  {app.free  && <span className="bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded px-1">Free</span>}
+                </div>
+              </div>
+              <p className="text-muted-foreground">{app.note}</p>
+              <p className="text-muted-foreground">Export: <span className="font-medium">{app.export}</span></p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
-type CaptureTab = 'walk' | 'describe' | 'photo';
+type CaptureTab = 'walk' | 'describe' | 'photo' | 'import';
 
 const TABS: { id: CaptureTab; label: string }[] = [
+  { id: 'import',   label: '📡 LiDAR' },
   { id: 'walk',     label: '📐 Walk' },
   { id: 'describe', label: '🗣️ Describe' },
   { id: 'photo',    label: '📸 Photo' },
@@ -505,12 +685,14 @@ export function RoomCaptureModal({
   open,
   onOpenChange,
   onCapture,
+  serverUrl = typeof window !== 'undefined' ? window.location.origin : '',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCapture: (data: CaptureResult) => void;
+  serverUrl?: string;
 }) {
-  const [tab, setTab] = useState<CaptureTab>('walk');
+  const [tab, setTab] = useState<CaptureTab>('import');
 
   function handleUse(data: CaptureResult) {
     onCapture(data);
@@ -538,6 +720,7 @@ export function RoomCaptureModal({
         </div>
 
         <div className="overflow-y-auto max-h-[60vh]">
+          {tab === 'import'   && <ImportTab   onUse={handleUse} serverUrl={serverUrl} />}
           {tab === 'walk'     && <WalkTab     onUse={handleUse} />}
           {tab === 'describe' && <DescribeTab onUse={handleUse} />}
           {tab === 'photo'    && <PhotoTab    onUse={handleUse} />}
